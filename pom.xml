@@ -366,7 +366,7 @@
                         <enabled>false</enabled>
                     </snapshots>
                 </repository>
-                <repository>
+                <!--<repository>
                     <id>localinstance</id>
                     <name>AEM local repository</name>
                     <url>http://localhost:4502/maven/repository</url>
@@ -376,7 +376,18 @@
                     <snapshots>
                         <enabled>true</enabled>
                     </snapshots>
-                </repository>                
+                </repository>-->
+                <repository>
+                    <id>localinstance</id>
+                    <name>Local repository</name>
+                    <url>file:///${project.basedir}/repository</url>
+                    <releases>
+                        <enabled>true</enabled>
+                    </releases>
+                    <snapshots>
+                        <enabled>true</enabled>
+                    </snapshots>
+                </repository>
             </repositories>
 
             <pluginRepositories>

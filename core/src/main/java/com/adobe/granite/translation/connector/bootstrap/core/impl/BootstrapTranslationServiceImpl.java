@@ -22,11 +22,15 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -68,6 +72,9 @@ public class BootstrapTranslationServiceImpl extends AbstractTranslationService 
     private String exportFormat = BootstrapConstants.EXPORT_FORMAT_XML;
     private BootstrapTmsService bootstrapTmsService;
     private final static String BOOTSTRAP_SERVICE = "bootstrap-service";
+
+    private static final Gson GSON = new GsonBuilder()
+            .setExclusionStrategies(new TranslationObjectJsonExclusionStrategy()).create();
 
 
     class TranslationJobDetails {
@@ -244,6 +251,7 @@ public class BootstrapTranslationServiceImpl extends AbstractTranslationService 
     @Override
     public TranslationStatus updateTranslationJobState(String strTranslationJobID, TranslationState state)
         throws TranslationException {
+        log.trace("BootstrapTranslationServiceImpl.updateTranslationJobState jobID='{}' state='{}'", strTranslationJobID, state.getStatus());
     	if(strTranslationJobID=="dummy"){
     		log.debug("Dummy Translation job detected");
     	} else if(strTranslationJobID == null) {
@@ -260,7 +268,7 @@ public class BootstrapTranslationServiceImpl extends AbstractTranslationService 
 
     @Override
     public TranslationStatus getTranslationJobStatus(String strTranslationJobID) throws TranslationException {
-        log.trace("BootstrapTranslationServiceImpl.getTranslationJobStatus");
+        log.trace("BootstrapTranslationServiceImpl.getTranslationJobStatus jobID='{}'", strTranslationJobID);
         String status = bootstrapTmsService.getTmsJobStatus(strTranslationJobID);
         log.debug("Status for Job {} is {}", strTranslationJobID, status);
         return TranslationStatus.fromString(status);
@@ -268,13 +276,13 @@ public class BootstrapTranslationServiceImpl extends AbstractTranslationService 
 
     @Override
     public CommentCollection<Comment> getTranslationJobCommentCollection(String strTranslationJobID) {
-        log.trace("BootstrapTranslationServiceImpl.getTranslationJobCommentCollection");
+        log.trace("BootstrapTranslationServiceImpl.getTranslationJobCommentCollection jobID='{}'", strTranslationJobID);
         return null;
     }
 
     @Override
     public void addTranslationJobComment(String strTranslationJobID, Comment comment) throws TranslationException {
-        log.trace("BootstrapTranslationServiceImpl.addTranslationJobComment");
+        log.trace("BootstrapTranslationServiceImpl.addTranslationJobComment jobID='{}'", strTranslationJobID);
 
         throw new TranslationException("This function is not implemented",
             TranslationException.ErrorCode.SERVICE_NOT_IMPLEMENTED);
@@ -283,13 +291,16 @@ public class BootstrapTranslationServiceImpl extends AbstractTranslationService 
     @Override
     public InputStream getTranslatedObject(String strTranslationJobID, TranslationObject translationObj)
         throws TranslationException {
-        log.trace("BootstrapTranslationServiceImpl.getTranslatedObject");
-        return bootstrapTmsService.getTmsObjectTranslatedInputStream(strTranslationJobID, getObjectPath(translationObj));
+        String objectPath = getObjectPath(translationObj);
+        log.trace("BootstrapTranslationServiceImpl.getTranslatedObject jobID='{}' object='{}'", strTranslationJobID, serializeTranslationObject(translationObj));
+        return bootstrapTmsService.getTmsObjectTranslatedInputStream(strTranslationJobID, objectPath);
     }
 
     @Override
     public String uploadTranslationObject(String strTranslationJobID, TranslationObject translationObject)
         throws TranslationException {
+        String path = getObjectPath(translationObject);
+        log.trace("BootstrapTranslationServiceImpl.uploadTranslationObject jobID='{}' object='{}'", strTranslationJobID, serializeTranslationObject(translationObject));
 
         InputStream inputStream;
         log.trace("Using {} InputStream", exportFormat);
@@ -303,7 +314,7 @@ public class BootstrapTranslationServiceImpl extends AbstractTranslationService 
         	inputStream = translationObject.getTranslationObjectXMLInputStream();
         }
 
-	String objectPath = bootstrapTmsService.uploadBootstrapTmsObject(strTranslationJobID, getObjectPath(translationObject), inputStream, translationObject.getMimeType(), exportFormat);
+        String objectPath = bootstrapTmsService.uploadBootstrapTmsObject(strTranslationJobID, path, inputStream, translationObject.getMimeType(), exportFormat);
 
 		// Generate Preview
 		if(isPreviewEnabled) {
@@ -312,7 +323,7 @@ public class BootstrapTranslationServiceImpl extends AbstractTranslationService 
 				if (zipInputStream != null) {
 					unzipFileFromStream(zipInputStream, previewPath);
 				} else {
-					log.error("Got null for zipInputStream for " + getObjectPath(translationObject));
+					log.error("Got null for zipInputStream for " + path);
 				}
 			} catch (FileNotFoundException e) {
 				log.error(e.getLocalizedMessage(), e);
@@ -328,23 +339,26 @@ public class BootstrapTranslationServiceImpl extends AbstractTranslationService 
     @Override
     public TranslationStatus updateTranslationObjectState(String strTranslationJobID,
         TranslationObject translationObject, TranslationState state) throws TranslationException {
-        log.trace("BootstrapTranslationServiceImpl.updateTranslationObjectState");
-        bootstrapTmsService.setTmsProperty(strTranslationJobID+getObjectPath(translationObject), BootstrapTmsConstants.BOOTSTRAP_TMS_STATUS, state.getStatus().toString());
+
+        String objectPath = getObjectPath(translationObject);
+        log.trace(String.format("BootstrapTranslationServiceImpl.updateTranslationObjectState jobID='%s' object='%s' state='%s'", strTranslationJobID, serializeTranslationObject(translationObject), state.getStatus()));
+        bootstrapTmsService.setTmsProperty(strTranslationJobID+ objectPath, BootstrapTmsConstants.BOOTSTRAP_TMS_STATUS, state.getStatus().toString());
         return state.getStatus();
     }
 
     @Override
     public TranslationStatus getTranslationObjectStatus(String strTranslationJobID,
         TranslationObject translationObject) throws TranslationException {
-        String status = bootstrapTmsService.getTmsObjectStatus(strTranslationJobID, getObjectPath(translationObject));
+        String objectPath = getObjectPath(translationObject);
+        log.trace("BootstrapTranslationServiceImpl.getTranslationObjectStatus jobID='{}' object='{}'", strTranslationJobID, serializeTranslationObject(translationObject));
+        String status = bootstrapTmsService.getTmsObjectStatus(strTranslationJobID, objectPath);
         return TranslationConstants.TranslationStatus.fromString(status);
     }
 
     @Override
     public TranslationStatus[] updateTranslationObjectsState(String strTranslationJobID,
         TranslationObject[] translationObjects, TranslationState[] states) throws TranslationException {
-        log.trace("BootstrapTranslationServiceImpl.updateTranslationObjectsState");
-
+        log.trace("BootstrapTranslationServiceImpl.updateTranslationObjectsState jobID='{}'", strTranslationJobID);
         TranslationStatus[] retStatus = new TranslationStatus[states.length];
         for (int index = 0; index < states.length; index++) {
             retStatus[index] =
@@ -356,7 +370,7 @@ public class BootstrapTranslationServiceImpl extends AbstractTranslationService 
     @Override
     public TranslationStatus[] getTranslationObjectsStatus(String strTranslationJobID,
         TranslationObject[] translationObjects) throws TranslationException {
-        log.trace("BootstrapTranslationServiceImpl.getTranslationObjectsStatus");
+        log.trace("BootstrapTranslationServiceImpl.getTranslationObjectsStatus jobID='{}'", strTranslationJobID);
 
         TranslationStatus[] retStatus = new TranslationStatus[translationObjects.length];
         for (int index = 0; index < translationObjects.length; index++) {
@@ -368,8 +382,7 @@ public class BootstrapTranslationServiceImpl extends AbstractTranslationService 
     @Override
     public CommentCollection<Comment> getTranslationObjectCommentCollection(String strTranslationJobID,
         TranslationObject translationObject) throws TranslationException {
-        log.trace("BootstrapTranslationServiceImpl.getTranslationObjectCommentCollection");
-
+        log.trace("BootstrapTranslationServiceImpl.getTranslationObjectCommentCollection jobID='{}' object='{}'", strTranslationJobID, serializeTranslationObject(translationObject));
         throw new TranslationException("This function is not implemented",
             TranslationException.ErrorCode.SERVICE_NOT_IMPLEMENTED);
     }
@@ -377,8 +390,7 @@ public class BootstrapTranslationServiceImpl extends AbstractTranslationService 
     @Override
     public void addTranslationObjectComment(String strTranslationJobID, TranslationObject translationObject,
         Comment comment) throws TranslationException {
-        log.trace("BootstrapTranslationServiceImpl.addTranslationObjectComment");
-
+        log.trace("BootstrapTranslationServiceImpl.addTranslationObjectComment jobID='{}' object='{}'", strTranslationJobID, serializeTranslationObject(translationObject));
         throw new TranslationException("This function is not implemented",
             TranslationException.ErrorCode.SERVICE_NOT_IMPLEMENTED);
     }
@@ -386,8 +398,7 @@ public class BootstrapTranslationServiceImpl extends AbstractTranslationService 
     @Override
     public void updateTranslationJobMetadata(String strTranslationJobID, TranslationMetadata jobMetadata,
         TranslationMethod translationMethod) throws TranslationException {
-        log.trace("BootstrapTranslationServiceImpl.updateTranslationJobMetadata");
-
+        log.trace("BootstrapTranslationServiceImpl.updateTranslationJobMetadata jobID='{}'", strTranslationJobID);
         throw new TranslationException("This function is not implemented",
             TranslationException.ErrorCode.SERVICE_NOT_IMPLEMENTED);
     }
@@ -456,5 +467,93 @@ public class BootstrapTranslationServiceImpl extends AbstractTranslationService 
 		}
 		zipInputStream.close();
 	}
-    
+
+    private String serializeTranslationObject(TranslationObject obj)
+    {
+        try
+        {
+            return String.format("{" +
+                            "\"id\":\"%s\"," +
+                            "\"getTitle\":\"%s\"," +
+                            "\"getMimeType\":\"%s\"," +
+                            "\"getTranslationObjectTargetPath\":\"%s\"," +
+                            "\"getTranslationObjectSourcePath\":\"%s\"," +
+                            "\"getSourceVersion\":\"%s\"," +
+                            "\"getSupportingTranslationObjectsIterator\":\"%s\"," +
+                            "\"getSupportingTranslationObjectsCount\":\"%s\"," +
+                            "\"getTranslationJobMetadata\":\"%s\"," +
+                            "}",
+                    obj.getId(),
+                    obj.getTitle(),
+                    obj.getMimeType(),
+                    obj.getTranslationObjectTargetPath(),
+                    obj.getTranslationObjectSourcePath(),
+                    obj.getSourceVersion(),
+                    serializeSupportingTranslationObjects(obj.getSupportingTranslationObjectsIterator()),
+                    obj.getSupportingTranslationObjectsCount(),
+                    serializeMetadata(obj.getTranslationJobMetadata()));
+        } catch (Exception ex) {
+            log.error("Error on serialize of translation object", ex);
+            return ex.getMessage();
+        }
+    }
+
+    private String serializeMetadata(TranslationMetadata metadata) {
+        return String.format("{" +
+                    "\"isObjectTranslationRequired\":\"%s\"," +
+                        "\"isMetadataTranslationRequired\":\"%s\"," +
+                        "\"isSupportingObjectTranslationRequired\":\"%s\"," +
+                        "\"percentageComplete\":\"%s\"," +
+                        "\"translationState\":\"%s\"," +
+                        "\"initialScope\":\"%s\"," +
+                        "\"finalScope\":\"%s\"" +
+                "}",
+                metadata.isObjectTranslationRequired(),
+                metadata.isMetadataTranslationRequired(),
+                metadata.isSupportingObjectTranslationRequired(),
+                metadata.getPercentageComplete(),
+                serializeTranlsationState(metadata.getTranslationState()),
+                serializeTranlsationScope(metadata.getInitialScope()),
+                serializeTranlsationScope(metadata.getFinalScope()));
+    }
+
+    private String serializeTranlsationState(TranslationState state) {
+        if(state == null)
+            return null;
+
+        return String.format("{\"status\":\"%s\"}", state.getStatus());
+    }
+
+    private String serializeTranlsationScope(TranslationScope scope) {
+        if(scope == null)
+            return null;
+
+        return String.format("{" +
+                "\"wordCount\":\"%s\"," +
+                "\"imageCount\":\"%s\"," +
+                "\"videoCount\":\"%s\"" +
+                "}",
+                scope.getWordCount(),
+                scope.getImageCount(),
+                scope.getVideoCount());
+    }
+
+    private String serializeSupportingTranslationObjects(Map<String, List<TranslationObject>> map) {
+        if (map == null) {
+            return null;
+        }
+
+        return "[" + map.entrySet().stream().map(this::serializeSupportingTranslationObject).collect(Collectors.joining(",")) + "]";
+    }
+
+    private String serializeSupportingTranslationObject(Map.Entry<String, List<TranslationObject>> entry) {
+        return String.format("{\"key\": \"%s\", \"value\":\"%s\"}", entry.getKey(), serializeSupportingTranslationObjectList(entry.getValue()));
+    }
+
+    private String serializeSupportingTranslationObjectList(List<TranslationObject> list) {
+        if (list == null) {
+            return null;
+        }
+        return "[" + list.stream().map(this::serializeTranslationObject).collect(Collectors.joining(",")) + "]";
+    }
 }
